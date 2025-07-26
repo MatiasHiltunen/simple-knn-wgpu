@@ -1,0 +1,59 @@
+[package]
+name = "simple-knn-wgpu"
+version = "0.1.0"
+edition = "2024"
+authors = ["Your Name <your.email@example.com>"]
+description = "High-performance k-nearest neighbor search using wgpu compute shaders"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/simple-knn-wgpu"
+readme = "README.md"
+keywords = ["knn", "gpu", "wgpu", "compute", "nearest-neighbor"]
+categories = ["algorithms", "science", "graphics"]
+
+[dependencies]
+# Core wgpu dependency
+wgpu = { version = "26.0.1", features = ["wgsl"] }
+
+# Async runtime for wgpu
+pollster = "0.4"
+futures = "0.3"
+
+# Math utilities
+glam = "0.29"
+bytemuck = { version = "1.19", features = ["derive"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Optional Python bindings
+pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
+numpy = { version = "0.23", optional = true }
+
+[dev-dependencies]
+# Testing utilities
+approx = "0.5"
+criterion = { version = "0.6", features = ["html_reports"] }
+rand = "0.9.2"
+# For async examples
+tokio = { version = "1.42", features = ["full"] }
+
+[features]
+default = []
+python = ["pyo3", "numpy"]
+
+[[bench]]
+name = "knn_benchmark"
+harness = false
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"
