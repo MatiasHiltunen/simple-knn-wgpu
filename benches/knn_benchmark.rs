@@ -3,10 +3,10 @@
 //! This benchmark suite tests the performance of KNN computation
 //! across different point cloud sizes and configurations.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
 use simple_knn_wgpu::{compute_knn, GpuContext};
 use rand::prelude::*;
-use std::time::Duration;
+use std::{hint::black_box, time::Duration};
 
 /// Generates a random 3D point cloud.
 fn generate_random_points(num_points: usize, seed: u64) -> Vec<f32> {
@@ -14,9 +14,9 @@ fn generate_random_points(num_points: usize, seed: u64) -> Vec<f32> {
     let mut points = Vec::with_capacity(num_points * 3);
     
     for _ in 0..num_points {
-        points.push(rng.gen_range(-100.0..100.0));
-        points.push(rng.gen_range(-100.0..100.0));
-        points.push(rng.gen_range(-100.0..100.0));
+        points.push(rng.random_range(-100.0..100.0));
+        points.push(rng.random_range(-100.0..100.0));
+        points.push(rng.random_range(-100.0..100.0));
     }
     
     points
