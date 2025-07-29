@@ -1,5 +1,5 @@
 //! Shader management module for loading and compiling WGSL shaders.
-//! 
+//!
 //! This module handles the loading, compilation, and caching of all
 //! compute shaders used in the KNN algorithm.
 
@@ -48,7 +48,7 @@ pub struct CompiledShaders {
 
 impl CompiledShaders {
     /// Compiles all shaders for the given device.
-    /// 
+    ///
     /// # Errors
     /// Returns an error if any shader fails to compile.
     pub fn compile(device: &wgpu::Device, sources: &ShaderSources) -> Result<Self> {
@@ -57,7 +57,7 @@ impl CompiledShaders {
         let box_bbox = compile_shader(device, "box_bbox", sources.box_bbox)?;
         let knn = compile_shader(device, "knn", sources.knn)?;
         let radix = compile_shader(device, "radix", sources.radix)?;
-        
+
         Ok(Self {
             bbox,
             morton,
@@ -69,16 +69,12 @@ impl CompiledShaders {
 }
 
 /// Compiles a single shader module.
-fn compile_shader(
-    device: &wgpu::Device,
-    name: &str,
-    source: &str,
-) -> Result<wgpu::ShaderModule> {
+fn compile_shader(device: &wgpu::Device, name: &str, source: &str) -> Result<wgpu::ShaderModule> {
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(name),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(source)),
     });
-    
+
     Ok(module)
 }
 
@@ -98,42 +94,32 @@ pub fn validate_shader_entry_points(source: &str, expected: &[&str]) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_shader_sources_load() {
         let sources = ShaderSources::default();
-        
+
         // Verify all shaders are non-empty
         assert!(!sources.bbox.is_empty());
         assert!(!sources.morton.is_empty());
         assert!(!sources.box_bbox.is_empty());
         assert!(!sources.knn.is_empty());
         assert!(!sources.radix.is_empty());
-        
-        // Verify entry points exist
-        assert!(validate_shader_entry_points(
-            sources.bbox,
-            &["compute_bbox", "reduce_bbox"]
-        ).is_ok());
-        
-        assert!(validate_shader_entry_points(
-            sources.morton,
-            &["compute_morton"]
-        ).is_ok());
-        
-        assert!(validate_shader_entry_points(
-            sources.box_bbox,
-            &["compute_box_bbox"]
-        ).is_ok());
-        
-        assert!(validate_shader_entry_points(
-            sources.knn,
-            &["compute_knn"]
-        ).is_ok());
 
-        assert!(validate_shader_entry_points(
-            sources.radix,
-            &["radix_count", "radix_reorder"]
-        ).is_ok());
+        // Verify entry points exist
+        assert!(
+            validate_shader_entry_points(sources.bbox, &["compute_bbox", "reduce_bbox"]).is_ok()
+        );
+
+        assert!(validate_shader_entry_points(sources.morton, &["compute_morton"]).is_ok());
+
+        assert!(validate_shader_entry_points(sources.box_bbox, &["compute_box_bbox"]).is_ok());
+
+        assert!(validate_shader_entry_points(sources.knn, &["compute_knn"]).is_ok());
+
+        assert!(
+            validate_shader_entry_points(sources.radix, &["radix_count", "radix_reorder"]).is_ok()
+        );
     }
 }
+

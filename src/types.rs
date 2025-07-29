@@ -1,5 +1,5 @@
 //! Type definitions for GPU data structures.
-//! 
+//!
 //! This module defines all the data structures that are shared between
 //! CPU and GPU, ensuring proper alignment and layout for GPU usage.
 
@@ -7,7 +7,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 
 /// A 3D point representation that is GPU-compatible.
-/// 
+///
 /// Uses explicit repr(C) and bytemuck traits to ensure the data layout
 /// matches what the GPU expects in compute shaders.
 #[repr(C)]
@@ -27,21 +27,26 @@ impl Point3 {
     /// Creates a new point with the given coordinates.
     #[inline]
     pub fn new(x: f32, y: f32, z: f32) -> Self {
-        Self { x, y, z, _padding: 0.0 }
+        Self {
+            x,
+            y,
+            z,
+            _padding: 0.0,
+        }
     }
-    
+
     /// Creates a point from a glam Vec3.
     #[inline]
     pub fn from_vec3(v: Vec3) -> Self {
         Self::new(v.x, v.y, v.z)
     }
-    
+
     /// Converts this point to a glam Vec3.
     #[inline]
     pub fn to_vec3(&self) -> Vec3 {
         Vec3::new(self.x, self.y, self.z)
     }
-    
+
     /// Validates that the point contains finite values.
     #[inline]
     pub fn is_finite(&self) -> bool {
@@ -64,7 +69,7 @@ impl BoundingBox {
     pub fn new(min: Point3, max: Point3) -> Self {
         Self { min, max }
     }
-    
+
     /// Creates an empty bounding box (inverted min/max).
     pub fn empty() -> Self {
         Self {
@@ -72,7 +77,7 @@ impl BoundingBox {
             max: Point3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY),
         }
     }
-    
+
     /// Expands the bounding box to include the given point.
     pub fn expand(&mut self, point: &Point3) {
         self.min.x = self.min.x.min(point.x);
@@ -82,7 +87,7 @@ impl BoundingBox {
         self.max.y = self.max.y.max(point.y);
         self.max.z = self.max.z.max(point.z);
     }
-    
+
     /// Computes the squared distance from the box to a point.
     /// Returns 0.0 if the point is inside the box.
     pub fn distance_squared_to_point(&self, point: &Point3) -> f32 {
@@ -110,8 +115,8 @@ impl Default for KnnConfig {
     fn default() -> Self {
         Self {
             k: 3,
-            box_size: 256,  // Match the max_workgroup_size default
-            max_points: 10_000_000, // 10M points default limit
+            box_size: 256,           // Match the max_workgroup_size default
+            max_points: 10_000_000,  // 10M points default limit
             max_workgroup_size: 256, // Conservative default
         }
     }
@@ -134,10 +139,11 @@ impl KnnConfig {
         }
         Ok(())
     }
-    
+
     /// Calculates the number of boxes needed for the given number of points.
     pub fn num_boxes(&self, num_points: u32) -> u32 {
-        (num_points + self.box_size - 1) / self.box_size
+        // (num_points + self.box_size - 1) / self.box_size
+        num_points.div_ceil(self.box_size)
     }
 }
 
@@ -159,4 +165,4 @@ pub struct KnnResult {
     pub distances: Vec<f32>,
     /// Optional timing information (in milliseconds)
     pub compute_time_ms: Option<f32>,
-} 
+}
