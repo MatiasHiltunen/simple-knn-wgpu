@@ -6,6 +6,9 @@ authors = ["Your Name <your.email@example.com>"]
 description = "High-performance k-nearest neighbor search using wgpu compute shaders"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/yourusername/simple-knn-wgpu"
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 readme = "README.md"
 keywords = ["knn", "gpu", "wgpu", "compute", "nearest-neighbor"]
 categories = ["algorithms", "science", "graphics"]
@@ -21,6 +24,7 @@ futures = "0.3"
 # Math utilities
 glam = "0.29"
 bytemuck = { version = "1.19", features = ["derive"] }
+rayon = "1.10"
 
 # Error handling
 thiserror = "2.0"
