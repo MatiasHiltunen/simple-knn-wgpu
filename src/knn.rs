@@ -21,8 +21,6 @@ pub struct KnnCompute {
     context: GpuContext,
     /// Configuration
     config: KnnConfig,
-    /// Compiled shaders
-    shaders: CompiledShaders,
     /// Compute pipelines
     pipelines: ComputePipelines,
 }
@@ -34,6 +32,8 @@ struct ComputePipelines {
     morton: wgpu::ComputePipeline,
     box_bbox: wgpu::ComputePipeline,
     knn: wgpu::ComputePipeline,
+    radix_count: wgpu::ComputePipeline,
+    radix_reorder: wgpu::ComputePipeline,
 }
 
 impl KnnCompute {
@@ -51,11 +51,10 @@ impl KnnCompute {
         
         // Create compute pipelines
         let pipelines = create_pipelines(&context.device, &shaders)?;
-        
+
         Ok(Self {
             context,
             config,
-            shaders,
             pipelines,
         })
     }
@@ -114,11 +113,11 @@ impl KnnCompute {
         );
         // ------------------------------------------------------------------
  
-        // CPU step: Sort by Morton code (temporary until GPU radix sort is implemented)
+        // GPU step: radix sort points by Morton code
         let sort_start = Instant::now();
         let sorted_indices = self.sort_by_morton(&buffers, num_points).await?;
         info!(
-            "CPU sort by Morton completed in {:.2} ms",
+            "GPU sort by Morton completed in {:.2} ms",
             sort_start.elapsed().as_secs_f32() * 1000.0
         );
  
@@ -180,12 +179,14 @@ impl KnnCompute {
             mapped_at_creation: false,
         });
         
-        // Indices buffer
-        let indices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        // Indices buffer initialized with 0..num_points
+        let indices_data: Vec<u32> = (0..num_points).collect();
+        let indices_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Indices Buffer"),
-            size: (num_points * 4) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+            contents: cast_slice(&indices_data),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         });
         
         let box_bboxes = device.create_buffer(&wgpu::BufferDescriptor {
@@ -367,62 +368,106 @@ impl KnnCompute {
         Ok(())
     }
     
-    /// Sorts points by Morton code (CPU implementation for now).
+    /// Sorts points by Morton code using a GPU radix sort.
     async fn sort_by_morton(
         &self,
         buffers: &ComputeBuffers,
         num_points: u32,
     ) -> Result<wgpu::Buffer> {
-        debug!("Sorting by Morton code");
-        
-        // Read Morton codes from GPU
-        let morton_staging = self.context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Morton Staging Buffer"),
+        debug!("Sorting by Morton code (GPU radix sort)");
+
+        let device = &self.context.device;
+        let temp_indices = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Temp Indices"),
             size: (num_points * 4) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        
-        let mut encoder = self.context.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor::default()
-        );
-        encoder.copy_buffer_to_buffer(
-            &buffers.morton,
-            0,
-            &morton_staging,
-            0,
-            (num_points * 4) as u64,
-        );
-        self.context.queue.submit(Some(encoder.finish()));
-        
-        // Map and read Morton codes
-        let morton_slice = morton_staging.slice(..);
-        let (tx, rx) = futures::channel::oneshot::channel();
-        morton_slice.map_async(wgpu::MapMode::Read, move |result| {
-            tx.send(result).unwrap();
+        let temp_morton = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Temp Morton"),
+            size: (num_points * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
-        self.context.device.poll(wgpu::PollType::Wait).map_err(|_| KnnError::ComputeError("Failed to poll device".to_string()))?;
-        rx.await.unwrap().map_err(|e| KnnError::BufferMapError(e))?;
-        
-        let morton_data = morton_slice.get_mapped_range();
-        let morton_codes: Vec<u32> = cast_slice(&morton_data).to_vec();
-        drop(morton_data);
-        morton_staging.unmap();
-        
-        // Create indices and sort
-        let mut indices: Vec<u32> = (0..num_points).collect();
-        indices.sort_unstable_by_key(|&i| morton_codes[i as usize]);
-        
-        // Upload sorted indices
-        let sorted_indices_buffer = self.context.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Sorted Indices Buffer"),
-                contents: cast_slice(&indices),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        let prefix = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Radix Prefix"),
+            size: (num_points * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let counts = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Radix Counts"),
+            size: 8,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Radix Params"),
+            size: 256,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let workgroups = (num_points + 255) / 256;
+        let mut src_keys = &buffers.morton;
+        let mut dst_keys = &temp_morton;
+        let mut src_indices = &buffers.indices;
+        let mut dst_indices = &temp_indices;
+
+        for bit in 0..30u32 {
+            self.context.queue.write_buffer(&counts, 0, bytemuck::bytes_of(&[0u32, 0u32]));
+            self.context.queue.write_buffer(&params, 0, bytemuck::bytes_of(&[num_points, bit]));
+
+            let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Radix Count BG"),
+                layout: &self.pipelines.radix_count.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: src_keys.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: src_indices.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: prefix.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: counts.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: params.as_entire_binding() },
+                ],
+            });
+
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Radix Count Pass"), timestamp_writes: None });
+                pass.set_pipeline(&self.pipelines.radix_count);
+                pass.set_bind_group(0, &bg1, &[]);
+                pass.dispatch_workgroups(workgroups, 1, 1);
             }
-        );
-        
-        Ok(sorted_indices_buffer)
+            self.context.queue.submit(Some(encoder.finish()));
+
+            self.context.queue.write_buffer(&params, 0, bytemuck::bytes_of(&[num_points, bit]));
+            let bg2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Radix Reorder BG"),
+                layout: &self.pipelines.radix_reorder.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: src_keys.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: src_indices.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: prefix.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: counts.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: dst_keys.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 5, resource: dst_indices.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 6, resource: params.as_entire_binding() },
+                ],
+            });
+
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Radix Reorder Pass"), timestamp_writes: None });
+                pass.set_pipeline(&self.pipelines.radix_reorder);
+                pass.set_bind_group(0, &bg2, &[]);
+                pass.dispatch_workgroups(workgroups, 1, 1);
+            }
+            self.context.queue.submit(Some(encoder.finish()));
+
+            std::mem::swap(&mut src_keys, &mut dst_keys);
+            std::mem::swap(&mut src_indices, &mut dst_indices);
+        }
+
+        Ok(src_indices.clone())
     }
     
     /// Computes bounding boxes for each spatial partition box.
@@ -630,6 +675,24 @@ fn create_pipelines(
         compilation_options: Default::default(),
         cache: None,
     });
+
+    let radix_count = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Radix Count Pipeline"),
+        layout: None,
+        module: &shaders.radix,
+        entry_point: Some("radix_count"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+
+    let radix_reorder = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Radix Reorder Pipeline"),
+        layout: None,
+        module: &shaders.radix,
+        entry_point: Some("radix_reorder"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
     
     Ok(ComputePipelines {
         bbox_compute,
@@ -637,6 +700,8 @@ fn create_pipelines(
         morton,
         box_bbox,
         knn,
+        radix_count,
+        radix_reorder,
     })
 }
 

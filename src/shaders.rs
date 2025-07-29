@@ -16,6 +16,8 @@ pub struct ShaderSources {
     pub box_bbox: &'static str,
     /// KNN search shader
     pub knn: &'static str,
+    /// Radix sort shader
+    pub radix: &'static str,
 }
 
 impl Default for ShaderSources {
@@ -25,6 +27,7 @@ impl Default for ShaderSources {
             morton: include_str!("shaders/morton.wgsl"),
             box_bbox: include_str!("shaders/box_bbox.wgsl"),
             knn: include_str!("shaders/knn.wgsl"),
+            radix: include_str!("shaders/sort.wgsl"),
         }
     }
 }
@@ -39,6 +42,8 @@ pub struct CompiledShaders {
     pub box_bbox: wgpu::ShaderModule,
     /// KNN search shader module
     pub knn: wgpu::ShaderModule,
+    /// Radix sort shader module
+    pub radix: wgpu::ShaderModule,
 }
 
 impl CompiledShaders {
@@ -51,12 +56,14 @@ impl CompiledShaders {
         let morton = compile_shader(device, "morton", sources.morton)?;
         let box_bbox = compile_shader(device, "box_bbox", sources.box_bbox)?;
         let knn = compile_shader(device, "knn", sources.knn)?;
+        let radix = compile_shader(device, "radix", sources.radix)?;
         
         Ok(Self {
             bbox,
             morton,
             box_bbox,
             knn,
+            radix,
         })
     }
 }
@@ -101,6 +108,7 @@ mod tests {
         assert!(!sources.morton.is_empty());
         assert!(!sources.box_bbox.is_empty());
         assert!(!sources.knn.is_empty());
+        assert!(!sources.radix.is_empty());
         
         // Verify entry points exist
         assert!(validate_shader_entry_points(
@@ -122,5 +130,10 @@ mod tests {
             sources.knn,
             &["compute_knn"]
         ).is_ok());
+
+        assert!(validate_shader_entry_points(
+            sources.radix,
+            &["radix_count", "radix_reorder"]
+        ).is_ok());
     }
-} 
+}
