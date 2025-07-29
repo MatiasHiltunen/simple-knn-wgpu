@@ -423,10 +423,16 @@ impl KnnCompute {
                 layout: &self.pipelines.radix_count.get_bind_group_layout(0),
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: src_keys.as_entire_binding() },
+<<<<<<< ours
                     wgpu::BindGroupEntry { binding: 1, resource: src_indices.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 2, resource: prefix.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 3, resource: counts.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 4, resource: params.as_entire_binding() },
+=======
+                    wgpu::BindGroupEntry { binding: 1, resource: prefix.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: counts.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: params.as_entire_binding() },
+>>>>>>> theirs
                 ],
             });
 
