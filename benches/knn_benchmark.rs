@@ -113,7 +113,8 @@ fn benchmark_knn_scaling(c: &mut Criterion) {
     for &num_points in &[10_000, 50_000, 100_000, 250_000, 500_000] {
         if num_points > 100_000 {
             // Reduce sample size for very large clouds
-            group.sample_size(5);
+            // Keep minimum sample size of 10 to satisfy Criterion's requirements
+            group.sample_size(10);
         }
         
         let points = generate_random_points(num_points, 42);

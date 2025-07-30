@@ -423,13 +423,13 @@ impl KnnCompute {
         });
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Radix Params"),
-            size: 4,
+            size: 256,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         self.context
             .queue
-            .write_buffer(&params, 0, bytemuck::bytes_of(&num_points));
+            .write_buffer(&params, 0, bytemuck::bytes_of(&[num_points, 0u32]));
 
         let workgroups = num_points.div_ceil(256);
         let mut src_keys = &buffers.morton;
@@ -445,6 +445,9 @@ impl KnnCompute {
             self.context
                 .queue
                 .write_buffer(&counts, 0, bytemuck::bytes_of(&[0u32, 0u32]));
+            self.context
+                .queue
+                .write_buffer(&params, 0, bytemuck::bytes_of(&[num_points, bit]));
 
             // Bind group for the counting pass
             let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -518,7 +521,7 @@ impl KnnCompute {
                 });
                 pass.set_pipeline(&self.pipelines.radix_count);
                 pass.set_bind_group(0, &bg1, &[]);
-                pass.set_push_constants(0, bytemuck::bytes_of(&bit));
+                // push constants removed, bit now passed via uniform buffer
                 pass.dispatch_workgroups(workgroups, 1, 1);
             }
             {
@@ -528,7 +531,7 @@ impl KnnCompute {
                 });
                 pass.set_pipeline(&self.pipelines.radix_reorder);
                 pass.set_bind_group(0, &bg2, &[]);
-                pass.set_push_constants(0, bytemuck::bytes_of(&bit));
+                // push constants removed, bit now passed via uniform buffer
                 pass.dispatch_workgroups(workgroups, 1, 1);
             }
 
