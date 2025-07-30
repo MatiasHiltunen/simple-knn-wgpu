@@ -6,8 +6,14 @@
 
 struct Params {
     num: u32,
+};
+
+@push_constant
+struct Push {
     bit: u32,
 };
+
+var<push_constant> pc: Push;
 
 @group(0) @binding(0)
 var<storage, read> in_keys: array<u32>;
@@ -24,7 +30,7 @@ fn radix_count(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (idx >= params.num) { return; }
 
     let key = in_keys[idx];
-    let bit = (key >> params.bit) & 1u;
+    let bit = (key >> pc.bit) & 1u;
 
     if (bit == 0u) {
         prefix[idx] = atomicAdd(&counts[0], 1u);
@@ -55,7 +61,7 @@ fn radix_reorder(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (idx >= r_params.num) { return; }
 
     let key = r_in_keys[idx];
-    let bit = (key >> r_params.bit) & 1u;
+    let bit = (key >> pc.bit) & 1u;
     let p = r_prefix[idx];
     let zeros = atomicLoad(&r_counts[0]);
 
