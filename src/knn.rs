@@ -434,6 +434,9 @@ impl KnnCompute {
         let mut src_indices = &buffers.indices;
         let mut dst_indices = &temp_indices;
 
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+
         for bit in 0..30u32 {
             self.context
                 .queue
@@ -469,8 +472,6 @@ impl KnnCompute {
                 ],
             });
 
-            let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("Radix Count Pass"),
@@ -480,7 +481,6 @@ impl KnnCompute {
                 pass.set_bind_group(0, &bg1, &[]);
                 pass.dispatch_workgroups(workgroups, 1, 1);
             }
-            self.context.queue.submit(Some(encoder.finish()));
 
             self.context
                 .queue
@@ -520,8 +520,6 @@ impl KnnCompute {
                 ],
             });
 
-            let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("Radix Reorder Pass"),
@@ -531,13 +529,28 @@ impl KnnCompute {
                 pass.set_bind_group(0, &bg2, &[]);
                 pass.dispatch_workgroups(workgroups, 1, 1);
             }
-            self.context.queue.submit(Some(encoder.finish()));
 
             std::mem::swap(&mut src_keys, &mut dst_keys);
             std::mem::swap(&mut src_indices, &mut dst_indices);
         }
-
-        Ok(src_indices.clone())
+        self.context.queue.submit(Some(encoder.finish()));
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let sorted_indices = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Sorted Indices"),
+            size: (num_points * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_buffer_to_buffer(
+            src_indices,
+            0,
+            &sorted_indices,
+            0,
+            (num_points * 4) as u64,
+        );
+        self.context.queue.submit(Some(encoder.finish()));
+        Ok(sorted_indices)
     }
 
     /// Computes bounding boxes for each spatial partition box.
