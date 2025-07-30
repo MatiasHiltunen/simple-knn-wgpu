@@ -33,6 +33,7 @@ struct ComputePipelines {
     box_bbox: wgpu::ComputePipeline,
     knn: wgpu::ComputePipeline,
     radix_count: wgpu::ComputePipeline,
+    radix_prefix: wgpu::ComputePipeline,
     radix_reorder: wgpu::ComputePipeline,
 }
 
@@ -415,10 +416,18 @@ impl KnnCompute {
         });
         let counts = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Radix Counts"),
-            size: 8,
+            size: 64,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let offsets = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Radix Offsets"),
+            size: 64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let params = device.create_buffer(&wgpu::BufferDescriptor {
@@ -434,13 +443,14 @@ impl KnnCompute {
         let mut src_indices = &buffers.indices;
         let mut dst_indices = &temp_indices;
 
-        for bit in 0..30u32 {
+        for shift in (0..32u32).step_by(4) {
+            let zeros: [u32; 16] = [0u32; 16];
             self.context
                 .queue
-                .write_buffer(&counts, 0, bytemuck::bytes_of(&[0u32, 0u32]));
+                .write_buffer(&counts, 0, bytemuck::cast_slice(&zeros));
             self.context
                 .queue
-                .write_buffer(&params, 0, bytemuck::bytes_of(&[num_points, bit]));
+                .write_buffer(&params, 0, bytemuck::bytes_of(&[num_points, shift]));
 
             let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Radix Count BG"),
@@ -468,23 +478,20 @@ impl KnnCompute {
                     },
                 ],
             });
-
-            let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Radix Count Pass"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.pipelines.radix_count);
-                pass.set_bind_group(0, &bg1, &[]);
-                pass.dispatch_workgroups(workgroups, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
-
-            self.context
-                .queue
-                .write_buffer(&params, 0, bytemuck::bytes_of(&[num_points, bit]));
+            let bg_prefix = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Radix Prefix BG"),
+                layout: &self.pipelines.radix_prefix.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: counts.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: offsets.as_entire_binding(),
+                    },
+                ],
+            });
             let bg2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Radix Reorder BG"),
                 layout: &self.pipelines.radix_reorder.get_bind_group_layout(0),
@@ -503,7 +510,7 @@ impl KnnCompute {
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: counts.as_entire_binding(),
+                        resource: offsets.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 4,
@@ -522,6 +529,24 @@ impl KnnCompute {
 
             let mut encoder =
                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Radix Count Pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipelines.radix_count);
+                pass.set_bind_group(0, &bg1, &[]);
+                pass.dispatch_workgroups(workgroups, 1, 1);
+            }
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Radix Prefix Pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipelines.radix_prefix);
+                pass.set_bind_group(0, &bg_prefix, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("Radix Reorder Pass"),
@@ -760,6 +785,15 @@ fn create_pipelines(device: &wgpu::Device, shaders: &CompiledShaders) -> Result<
         cache: None,
     });
 
+    let radix_prefix = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Radix Prefix Pipeline"),
+        layout: None,
+        module: &shaders.radix,
+        entry_point: Some("radix_prefix"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+
     let radix_reorder = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("Radix Reorder Pipeline"),
         layout: None,
@@ -776,6 +810,7 @@ fn create_pipelines(device: &wgpu::Device, shaders: &CompiledShaders) -> Result<
         box_bbox,
         knn,
         radix_count,
+        radix_prefix,
         radix_reorder,
     })
 }

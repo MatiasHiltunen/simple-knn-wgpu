@@ -118,8 +118,11 @@ mod tests {
         assert!(validate_shader_entry_points(sources.knn, &["compute_knn"]).is_ok());
 
         assert!(
-            validate_shader_entry_points(sources.radix, &["radix_count", "radix_reorder"]).is_ok()
+            validate_shader_entry_points(
+                sources.radix,
+                &["radix_count", "radix_prefix", "radix_reorder"]
+            )
+            .is_ok()
         );
     }
 }
-
