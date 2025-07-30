@@ -423,10 +423,13 @@ impl KnnCompute {
         });
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Radix Params"),
-            size: 256,
+            size: 4,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        self.context
+            .queue
+            .write_buffer(&params, 0, bytemuck::bytes_of(&num_points));
 
         let workgroups = num_points.div_ceil(256);
         let mut src_keys = &buffers.morton;
@@ -438,13 +441,12 @@ impl KnnCompute {
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
         for bit in 0..30u32 {
+            // Reset counters for this bit
             self.context
                 .queue
                 .write_buffer(&counts, 0, bytemuck::bytes_of(&[0u32, 0u32]));
-            self.context
-                .queue
-                .write_buffer(&params, 0, bytemuck::bytes_of(&[num_points, bit]));
 
+            // Bind group for the counting pass
             let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Radix Count BG"),
                 layout: &self.pipelines.radix_count.get_bind_group_layout(0),
@@ -453,10 +455,6 @@ impl KnnCompute {
                         binding: 0,
                         resource: src_keys.as_entire_binding(),
                     },
-                    // wgpu::BindGroupEntry {
-                    //     binding: 1,
-                    //     resource: src_indices.as_entire_binding(),
-                    // },
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: prefix.as_entire_binding(),
@@ -472,19 +470,8 @@ impl KnnCompute {
                 ],
             });
 
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Radix Count Pass"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.pipelines.radix_count);
-                pass.set_bind_group(0, &bg1, &[]);
-                pass.dispatch_workgroups(workgroups, 1, 1);
-            }
+            // Bind group for the reorder pass
 
-            self.context
-                .queue
-                .write_buffer(&params, 0, bytemuck::bytes_of(&[num_points, bit]));
             let bg2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Radix Reorder BG"),
                 layout: &self.pipelines.radix_reorder.get_bind_group_layout(0),
@@ -520,6 +507,20 @@ impl KnnCompute {
                 ],
             });
 
+            // Use a single command encoder for both passes to reduce submission overhead
+            let mut encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Radix Count Pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipelines.radix_count);
+                pass.set_bind_group(0, &bg1, &[]);
+                pass.set_push_constants(0, bytemuck::bytes_of(&bit));
+                pass.dispatch_workgroups(workgroups, 1, 1);
+            }
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("Radix Reorder Pass"),
@@ -527,6 +528,7 @@ impl KnnCompute {
                 });
                 pass.set_pipeline(&self.pipelines.radix_reorder);
                 pass.set_bind_group(0, &bg2, &[]);
+                pass.set_push_constants(0, bytemuck::bytes_of(&bit));
                 pass.dispatch_workgroups(workgroups, 1, 1);
             }
 
