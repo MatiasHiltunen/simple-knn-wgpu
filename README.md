@@ -102,10 +102,3 @@ cargo run --example basic
 
 This project is dual-licensed under MIT OR Apache-2.0.
 
-### Future Improvements
-
-- [ ] GPU-based radix sort (currently using CPU sort)
-- [ ] Variable K support (currently fixed at k=3)
-- [ ] Half-precision float support
-- [ ] WebGPU browser demo
-- [ ] Benchmarks against other implementations 
