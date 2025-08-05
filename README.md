@@ -4,6 +4,7 @@ K-nearest neighbor search for 3D point clouds using WGPU compute shaders. Please
 
 This library aims to provide cross-platform GPU acceleration for KNN computations using wgpu. It's primarily designed as an alternative to CUDA-based implementations.
 
+
 Based on python package [simple-knn](https://github.com/camenduru/simple-knn).
 
 ## Features
