@@ -14,7 +14,6 @@ Based on python package [simple-knn](https://github.com/camenduru/simple-knn).
 - Cross-platform support via wgpu (Vulkan, Metal, D3D12, WebGPU)
 - Optimized for 3-NN (finds 3 nearest neighbors per point)
 
-
 ## Quick Start
 
 ```rust
